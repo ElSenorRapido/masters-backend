@@ -4,9 +4,10 @@ from bs4 import BeautifulSoup
 from rapidfuzz import process
 import os
 import time
+from flask_cors import CORS
 
 app = Flask(__name__)
-
+CORS(app) 
 cache = {
     "espn_data": [],
     "scores": {},
