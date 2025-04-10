@@ -1,62 +1,58 @@
 from flask import Flask, jsonify
 import requests
-from bs4 import BeautifulSoup
 import os
+import time
 
 app = Flask(__name__)
 
+# Store the last response and timestamp
+cache = {
+    "data": {},
+    "last_updated": 0
+}
+
+SLASH_GOLF_API_KEY = "4b9a8ce3c2mshb857fff0fa65ccbp18968fjsn469673205eb9"
+API_URL = "https://slashgolf.p.rapidapi.com/v1/events/masters/leaderboard"
+HEADERS = {
+    "X-RapidAPI-Key": SLASH_GOLF_API_KEY,
+    "X-RapidAPI-Host": "slashgolf.p.rapidapi.com"
+}
+
 @app.route("/api/scores")
 def get_scores():
-    url = "http://www.espn.com/golf/leaderboard"
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    now = time.time()
+
+    # If it's been less than 10 minutes (600 sec), return cached
+    if now - cache["last_updated"] < 600:
+        return jsonify(cache["data"])
 
     try:
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
-        table = soup.find("table")
+        res = requests.get(API_URL, headers=HEADERS)
+        res.raise_for_status()
+        leaderboard = res.json()
 
         players = {}
+        for player in leaderboard.get("leaderboard", []):
+            name = player.get("player", {}).get("full_name", "Unknown")
+            score = player.get("score", None)
+            status = player.get("status", "")
 
-        if not table:
-            return jsonify({"error": "Leaderboard table not found"}), 500
+            if score is not None:
+                # Optional: Add penalty for CUT players
+                if status.upper() == "CUT":
+                    score += 160
+                players[name] = score
 
-        rows = table.find_all("tr")[1:]  # skip table header
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) < 2:
-                continue
-
-            # Try finding the name inside <a> or <span>
-            name_tag = cols[0].find("a") or cols[0].find("span")
-            name = name_tag.get_text(strip=True) if name_tag else cols[0].get_text(strip=True)
-
-            raw_score = cols[1].get_text(strip=True)
-            if not name:
-                continue
-
-            if raw_score == "E":
-                score = 0
-            elif raw_score.startswith("+") or raw_score.startswith("-"):
-                try:
-                    score = int(raw_score)
-                except:
-                    continue
-            else:
-                try:
-                    score = int(raw_score)
-                except:
-                    continue
-
-            players[name] = score
+        # Update cache
+        cache["data"] = players
+        cache["last_updated"] = now
 
         return jsonify(players)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Required for Render
+# For Render to assign port
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
