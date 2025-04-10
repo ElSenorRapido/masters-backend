@@ -1,59 +1,59 @@
 from flask import Flask, jsonify
-import requests
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import os
 import time
 
 app = Flask(__name__)
 
-# Cache to limit API calls (refresh every 10 minutes)
+# Cache to avoid hitting the Sheets API too often
 cache = {
     "data": {},
     "last_updated": 0
 }
 
-# API endpoint and auth
-API_URL = "https://live-golf-data.p.rapidapi.com/tournament"
-HEADERS = {
-    "X-RapidAPI-Key": "4b9a8ce3c2mshb857fff0fa65ccbp18968fjsn469673205eb9",
-    "X-RapidAPI-Host": "live-golf-data.p.rapidapi.com"
-}
-PARAMS = {
-    "orgId": "1",     # PGA
-    "tournId": "475", # Masters
-    "year": "2024"    # ✅ 2025 Masters
-}
+# Path to your downloaded JSON key
+GOOGLE_SHEET_CREDENTIALS = "sheets-access.json"  # rename to match your downloaded file
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1mi_QtSfe0SfIv5X22a82Hz6sQrColIre24aZelFyadM/edit#gid=1355164371"
 
 @app.route("/api/scores")
 def get_scores():
     now = time.time()
-
-    # Return cached results if within 10 minutes
-    if now - cache["last_updated"] < 600:
+    if now - cache["last_updated"] < 300:
         return jsonify(cache["data"])
 
     try:
-        res = requests.get(API_URL, headers=HEADERS, params=PARAMS)
-        res.raise_for_status()
-        data = res.json()
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEET_CREDENTIALS, scope)
+        client = gspread.authorize(creds)
+
+        sheet = client.open_by_url(SHEET_URL)
+        worksheet = sheet.get_worksheet(0)  # assumes leaderboard is on first tab
+
+        data = worksheet.get_all_values()
 
         players = {}
 
-        leaderboard = data.get("leaderboard", {}).get("players", [])
-        for p in leaderboard:
-            name = p.get("player_name", "Unknown")
-            score = p.get("total_to_par")
+        for row in data[1:]:  # skip header
+            if len(row) < 2:
+                continue
 
-            # Convert "E" to 0, try to parse as int
-            if score == "E":
+            name = row[0].strip()
+            score_raw = row[1].strip()
+
+            if not name or not score_raw:
+                continue
+
+            if score_raw == "E":
                 score = 0
-            try:
-                score = int(score)
-            except:
-                score = 999  # fallback for invalid or missing scores
+            else:
+                try:
+                    score = int(score_raw)
+                except:
+                    continue
 
             players[name] = score
 
-        # Update the cache
         cache["data"] = players
         cache["last_updated"] = now
         return jsonify(players)
@@ -61,7 +61,7 @@ def get_scores():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Needed by Render or any cloud host
+# For local dev or Render/Vercel backend
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
