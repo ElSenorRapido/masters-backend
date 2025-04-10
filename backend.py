@@ -20,7 +20,7 @@ HEADERS = {
 PARAMS = {
     "orgId": "1",     # PGA
     "tournId": "475", # Masters
-    "year": "2025"    # ✅ 2025 Masters
+    "year": "2024"    # ✅ 2025 Masters
 }
 
 @app.route("/api/scores")
