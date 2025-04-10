@@ -1,34 +1,53 @@
 from flask import Flask, jsonify
 import requests
+from bs4 import BeautifulSoup
 import os
 
 app = Flask(__name__)
 
 @app.route("/api/scores")
 def get_scores():
-    url = "https://site.api.espn.com/apis/site/v2/sports/golf/pga-tour/leaderboard"
+    url = "http://www.espn.com/golf/leaderboard"
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
     try:
-        response = requests.get(url)
-        data = response.json()
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table")
 
         players = {}
 
-        competitors = data["events"][0]["competitions"][0]["competitors"]
-        for player in competitors:
-            name = player["athlete"]["displayName"]
-            status = player["status"]["type"]["description"]
-            raw_score = player.get("score")
+        if not table:
+            return jsonify({"error": "Leaderboard table not found"}), 500
 
-            # ESPN sometimes lists score as string, sometimes number
-            try:
-                score = int(raw_score)
-            except:
+        rows = table.find_all("tr")[1:]  # skip table header
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) < 2:
+                continue
+
+            # Try finding the name inside <a> or <span>
+            name_tag = cols[0].find("a") or cols[0].find("span")
+            name = name_tag.get_text(strip=True) if name_tag else cols[0].get_text(strip=True)
+
+            raw_score = cols[1].get_text(strip=True)
+            if not name:
+                continue
+
+            if raw_score == "E":
                 score = 0
-
-            # Apply 80-stroke penalty for rounds 3 & 4 if CUT
-            if status == "CUT":
-                score += 160
+            elif raw_score.startswith("+") or raw_score.startswith("-"):
+                try:
+                    score = int(raw_score)
+                except:
+                    continue
+            else:
+                try:
+                    score = int(raw_score)
+                except:
+                    continue
 
             players[name] = score
 
@@ -37,7 +56,7 @@ def get_scores():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Required for Render to expose the port
+# Required for Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
