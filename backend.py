@@ -16,12 +16,17 @@ def get_scores():
         table = soup.find("table")
         players = {}
 
-        for row in table.find_all("tr")[1:]:
+        for row in table.find_all("tr")[1:]:  # skip table header
             cols = row.find_all("td")
             if len(cols) < 2:
                 continue
 
-            name = cols[0].get_text(strip=True)
+            # 🧠 Fix: Properly parse golfer name (some are inside <a>, some in <span>)
+            name_tag = cols[0].find("a") or cols[0].find("span")
+            name = name_tag.get_text(strip=True) if name_tag else ""
+            if not name:
+                continue
+
             raw_score = cols[1].get_text(strip=True)
 
             if raw_score == "E":
@@ -44,6 +49,7 @@ def get_scores():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 🔧 Let Render assign the port and expose the app
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
