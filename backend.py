@@ -1,67 +1,80 @@
 from flask import Flask, jsonify
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from pga_live_leaderboard import Leaderboard
+from rapidfuzz import process
 import os
 import time
 
 app = Flask(__name__)
 
-# Cache to avoid hitting the Sheets API too often
+# Your original picks, from the pool
+# You can include every name as entered, even with typos
+player_pool = [
+    "Scottie Scheffler", "Rory McIlroy", "John Rahm", "Xander Schauffle",
+    "Brook Koepka", "Tony Finau", "Juston Thomas", "Ludvig Aaberg",
+    "Bryson DeChambeu", "Max Homa", "Wyndam Clark", "Jaoquin Nieman",
+    "Sam Burns", "Zach Johnson", "Akshay Bhatia", "JJ Spaun",
+    "Justin Rose", "Lucas Glover", "Daniel Berger", "Phil Mickelson",
+    "Cameron Davis", "Billy Horschel", "Dustin Johnson", "Viktor Hovland",
+    "Russell Henley", "Sungjae Im", "Corey Conners", "Sepp Straka",
+    "Aaron Rai", "Shane Lowry", "Taylor Pendrith", "Robert MacIntyre",
+    "JT Poston", "Harris English", "Nicolas Echavarria", "Patrick Reed",
+    "Chris Kirk", "Sahith Theegala", "Keegan Bradley", "Danny Willett",
+    "Adam Scott", "Nicolai Hojgaard", "Maverick McNealy", "Colin Morikawa",
+    "Denny McCarthy", "Matt Fitzpatrick", "Hideki Matsuyama"
+]
+
 cache = {
     "data": {},
     "last_updated": 0
 }
 
-# Path to your downloaded JSON key
-GOOGLE_SHEET_CREDENTIALS = "sheets-access.json"  # rename to match your downloaded file
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1mi_QtSfe0SfIv5X22a82Hz6sQrColIre24aZelFyadM/edit#gid=1355164371"
-
 @app.route("/api/scores")
 def get_scores():
     now = time.time()
+
+    # Use cache if within 5 minutes
     if now - cache["last_updated"] < 300:
         return jsonify(cache["data"])
 
     try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEET_CREDENTIALS, scope)
-        client = gspread.authorize(creds)
+        lb = Leaderboard()
+        data = lb.get_json()
 
-        sheet = client.open_by_url(SHEET_URL)
-        worksheet = sheet.get_worksheet(0)  # assumes leaderboard is on first tab
+        all_pga_players = {p["player_name"]: p.get("total", "999") for p in data.get("players", [])}
 
-        data = worksheet.get_all_values()
+        matched_scores = {}
 
-        players = {}
+        for user_entry in player_pool:
+            match, score = process.extractOne(user_entry, all_pga_players.keys())
+            matched_score_raw = all_pga_players.get(match)
 
-        for row in data[1:]:  # skip header
-            if len(row) < 2:
-                continue
+            try:
+                matched_score = 0 if matched_score_raw == "E" else int(matched_score_raw)
+            except:
+                matched_score = 999
 
-            name = row[0].strip()
-            score_raw = row[1].strip()
+            matched_scores[user_entry] = {
+                "matched_name": match,
+                "score": matched_score
+            }
 
-            if not name or not score_raw:
-                continue
+        # Add full leaderboard too
+        full_scores = {
+            name: 0 if raw == "E" else int(raw) if str(raw).lstrip("+-").isdigit() else 999
+            for name, raw in all_pga_players.items()
+        }
 
-            if score_raw == "E":
-                score = 0
-            else:
-                try:
-                    score = int(score_raw)
-                except:
-                    continue
-
-            players[name] = score
-
-        cache["data"] = players
+        cache["data"] = {
+            "matched_pool": matched_scores,
+            "full_leaderboard": full_scores
+        }
         cache["last_updated"] = now
-        return jsonify(players)
+
+        return jsonify(cache["data"])
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# For local dev or Render/Vercel backend
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
