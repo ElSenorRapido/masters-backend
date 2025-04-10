@@ -2,14 +2,14 @@ from flask import Flask, jsonify
 import requests
 from bs4 import BeautifulSoup
 from rapidfuzz import process
+from flask_cors import CORS
 import os
 import time
-from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app) 
+CORS(app)
+
 cache = {
-    "espn_data": [],
     "scores": {},
     "last_updated": 0
 }
@@ -52,8 +52,8 @@ initialPlayers = [
     {"name": "Havland Security", "picks": ["Collin Morikawa", "Viktor Hovland", "Sepp Straka", "Ludvig Aberg", "Robert Macintyre", "J.J. Spaun"], "tiebreaker": "-11"},
     {"name": "Rachel", "picks": ["Collin Morikawa", "Bryson DeChambeau", "Tony Finau", "Keegan Bradley", "Justin Rose", "Cameron Davis"], "tiebreaker": "-17"},
     {"name": "Zach", "picks": ["Scottie Scheffler", "Brooks Koepka", "Adam Scott", "Ludvig Aberg", "Robert Macintyre", "Bubba Watson"], "tiebreaker": "-16"}
-]
 
+]
 
 def fetch_espn_table():
     try:
@@ -86,41 +86,48 @@ def parse_espn_scores(table):
     return scores
 
 def get_best_match(name, candidates):
-    result = process.extractOne(name, candidates)
-    return result[0] if result else name
-
-def calculate_score(picks, scores):
-    matched_scores = []
-    names = list(scores.keys())
-    for name in picks:
-        matched_name = get_best_match(name, names)
-        matched_scores.append(scores.get(matched_name, 999))
-    matched_scores.sort()
-    return sum(matched_scores[:5])
+    match, _ = process.extractOne(name, candidates)
+    return match
 
 @app.route("/api/scores")
 def get_scores():
-    try:
-        now = time.time()
-        if now - cache["last_updated"] < 300:
-            return jsonify(cache["scores"])
+    now = time.time()
+    if now - cache["last_updated"] < 300:
+        return jsonify(cache["scores"])
 
-        table = fetch_espn_table()
-        scores = parse_espn_scores(table)
+    table = fetch_espn_table()
+    espn_scores = parse_espn_scores(table)
 
-        leaderboard = []
-        for entry in initialPlayers:
-            total = calculate_score(entry["picks"], scores)
-            leaderboard.append({**entry, "total": total})
+    leaderboard = []
+    names = list(espn_scores.keys())
 
-        leaderboard.sort(key=lambda x: x["total"])
-        cache["scores"] = leaderboard
-        cache["last_updated"] = now
+    for entry in initialPlayers:
+        detailed_picks = []
+        total_scores = []
+        
+        for pick in entry["picks"]:
+            matched_name = get_best_match(pick, names)
+            player_score = espn_scores.get(matched_name, 999)
+            detailed_picks.append({"golfer": matched_name, "score": player_score})
+            total_scores.append(player_score)
 
-        return jsonify(leaderboard)
-    except Exception as e:
-        return jsonify({"error": str(e)})
+        total_scores.sort()
+        total = sum(total_scores[:5])
+
+        leaderboard.append({
+            "name": entry["name"],
+            "total": total,
+            "tiebreaker": entry["tiebreaker"],
+            "picks": detailed_picks
+        })
+
+    leaderboard.sort(key=lambda x: x["total"])
+    cache["scores"] = leaderboard
+    cache["last_updated"] = now
+
+    return jsonify(leaderboard)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
