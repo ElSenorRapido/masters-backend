@@ -1,76 +1,38 @@
 from flask import Flask, jsonify
-from pga_live_leaderboard import Leaderboard
-from rapidfuzz import process
+import requests
+from bs4 import BeautifulSoup
 import os
-import time
 
 app = Flask(__name__)
 
-# Your original picks, from the pool
-# You can include every name as entered, even with typos
-player_pool = [
-    "Scottie Scheffler", "Rory McIlroy", "John Rahm", "Xander Schauffle",
-    "Brook Koepka", "Tony Finau", "Juston Thomas", "Ludvig Aaberg",
-    "Bryson DeChambeu", "Max Homa", "Wyndam Clark", "Jaoquin Nieman",
-    "Sam Burns", "Zach Johnson", "Akshay Bhatia", "JJ Spaun",
-    "Justin Rose", "Lucas Glover", "Daniel Berger", "Phil Mickelson",
-    "Cameron Davis", "Billy Horschel", "Dustin Johnson", "Viktor Hovland",
-    "Russell Henley", "Sungjae Im", "Corey Conners", "Sepp Straka",
-    "Aaron Rai", "Shane Lowry", "Taylor Pendrith", "Robert MacIntyre",
-    "JT Poston", "Harris English", "Nicolas Echavarria", "Patrick Reed",
-    "Chris Kirk", "Sahith Theegala", "Keegan Bradley", "Danny Willett",
-    "Adam Scott", "Nicolai Hojgaard", "Maverick McNealy", "Colin Morikawa",
-    "Denny McCarthy", "Matt Fitzpatrick", "Hideki Matsuyama"
-]
-
-cache = {
-    "data": {},
-    "last_updated": 0
-}
-
-@app.route("/api/scores")
-def get_scores():
-    now = time.time()
-
-    # Use cache if within 5 minutes
-    if now - cache["last_updated"] < 300:
-        return jsonify(cache["data"])
-
+@app.route("/api/espn-table")
+def get_espn_table():
     try:
-        lb = Leaderboard()
-        data = lb.get_json()
-
-        all_pga_players = {p["player_name"]: p.get("total", "999") for p in data.get("players", [])}
-
-        matched_scores = {}
-
-        for user_entry in player_pool:
-            match, score = process.extractOne(user_entry, all_pga_players.keys())
-            matched_score_raw = all_pga_players.get(match)
-
-            try:
-                matched_score = 0 if matched_score_raw == "E" else int(matched_score_raw)
-            except:
-                matched_score = 999
-
-            matched_scores[user_entry] = {
-                "matched_name": match,
-                "score": matched_score
-            }
-
-        # Add full leaderboard too
-        full_scores = {
-            name: 0 if raw == "E" else int(raw) if str(raw).lstrip("+-").isdigit() else 999
-            for name, raw in all_pga_players.items()
+        url = "https://www.espn.com/golf/leaderboard"
+        headers = {
+            "User-Agent": "Mozilla/5.0"
         }
 
-        cache["data"] = {
-            "matched_pool": matched_scores,
-            "full_leaderboard": full_scores
-        }
-        cache["last_updated"] = now
+        res = requests.get(url, headers=headers)
+        res.raise_for_status()
 
-        return jsonify(cache["data"])
+        soup = BeautifulSoup(res.text, "html.parser")
+        tables = soup.find_all("table")
+
+        if not tables:
+            return jsonify({"error": "No tables found"})
+
+        # Convert all tables to a list of row/column values
+        parsed_tables = []
+        for table in tables:
+            rows = []
+            for tr in table.find_all("tr"):
+                cells = [td.get_text(strip=True) for td in tr.find_all(["th", "td"])]
+                if cells:
+                    rows.append(cells)
+            parsed_tables.append(rows)
+
+        return jsonify({"tables": parsed_tables})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
