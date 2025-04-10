@@ -99,23 +99,26 @@ def calculate_score(picks, scores):
 
 @app.route("/api/scores")
 def get_scores():
-    now = time.time()
-    if now - cache["last_updated"] < 300:
-        return jsonify(cache["scores"])
+    try:
+        now = time.time()
+        if now - cache["last_updated"] < 300:
+            return jsonify(cache["scores"])
 
-    table = fetch_espn_table()
-    scores = parse_espn_scores(table)
+        table = fetch_espn_table()
+        scores = parse_espn_scores(table)
 
-    leaderboard = []
-    for entry in initialPlayers:
-        total = calculate_score(entry["picks"], scores)
-        leaderboard.append({**entry, "total": total})
+        leaderboard = []
+        for entry in initialPlayers:
+            total = calculate_score(entry["picks"], scores)
+            leaderboard.append({**entry, "total": total})
 
-    leaderboard.sort(key=lambda x: x["total"])
-    cache["scores"] = leaderboard
-    cache["last_updated"] = now
+        leaderboard.sort(key=lambda x: x["total"])
+        cache["scores"] = leaderboard
+        cache["last_updated"] = now
 
-    return jsonify(leaderboard)
+        return jsonify(leaderboard)
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
