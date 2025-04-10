@@ -85,8 +85,8 @@ def parse_espn_scores(table):
     return scores
 
 def get_best_match(name, candidates):
-    match, _ = process.extractOne(name, candidates)
-    return match
+    result = process.extractOne(name, candidates)
+    return result[0] if result else name
 
 def calculate_score(picks, scores):
     matched_scores = []
