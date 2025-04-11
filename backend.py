@@ -86,7 +86,7 @@ def parse_espn_scores(table):
     return scores
 
 def get_best_match(name, candidates):
-    match, _ = process.extractOne(name, candidates)
+    match, score, _ = process.extractOne(name, candidates)
     return match
 
 @app.route("/api/scores")
